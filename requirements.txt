@@ -1,0 +1,11 @@
+streamlit>=1.32.0
+langchain>=0.1.13
+langchain-groq
+langchain-community>=0.0.29
+tavily-python>=0.3.3
+python-dotenv>=1.0.1
+requests>=2.31.0
+
+fpdf2
+folium
+streamlit-folium
