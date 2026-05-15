@@ -131,7 +131,7 @@ This creates the "Maya is fetching live data..." experience that makes the app f
 
 ### 1. Clone the repo
 ```bash
-git clone https://github.com/Shrutij26/maya-travel-concierge.git
+https://github.com/Shrutij26/Travel-concierge-
 cd maya-travel-concierge
 ```
 
