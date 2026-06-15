@@ -7,6 +7,11 @@ Built with **LangChain Agents**, live APIs, and a beautiful Streamlit UI — May
 ---
 
 
+## 🔗 Live Demo
+
+👉 **[Try Maya here](https://wddgu6wljcjvaigbyh5cpb.streamlit.app/)**
+
+
 
 ## 🧠 The LangChain Magic — What's Really Happening
 
