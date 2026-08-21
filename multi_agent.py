@@ -26,25 +26,25 @@ def build_multi_agent_graph(llm, tools_dict, checkpointer):
     local_guide_agent = create_react_agent(
         llm, 
         tools=tools_dict.get("local_guide_tools", []), 
-        state_modifier="You are a Local Guide Agent. Use your tools to find top attractions and search the travel knowledge base."
+        messages_modifier="You are a Local Guide Agent. Use your tools to find top attractions and search the travel knowledge base."
     )
     
     logistics_agent = create_react_agent(
         llm, 
         tools=tools_dict.get("logistics_tools", []),
-        state_modifier="You are a Logistics Agent. Your job is to fetch the current weather and generate map coordinates for requested places."
+        messages_modifier="You are a Logistics Agent. Your job is to fetch the current weather and generate map coordinates for requested places."
     )
     
     budget_agent = create_react_agent(
         llm, 
         tools=tools_dict.get("budget_tools", []),
-        state_modifier="You are a Budget Agent. Your job is to search the web for cheap flights, hotel deals, and budget tips."
+        messages_modifier="You are a Budget Agent. Your job is to search the web for cheap flights, hotel deals, and budget tips."
     )
     
     planner_synthesizer = create_react_agent(
         llm,
         tools=tools_dict.get("planner_tools", []),
-        state_modifier=(
+        messages_modifier=(
             "You are Maya, the Chief Planner Agent. Synthesize the findings from the sub-agents into a highly-detailed, beautifully formatted day-by-day itinerary. "
             "IMPORTANT: If the user stated a preference, use the SavePreferenceTool to record it in Semantic Memory. "
             "You MUST present real image URLs retrieved by the budget agent (web search) side by side using HTML as per the critical image instructions."
