@@ -9,3 +9,11 @@ requests>=2.31.0
 fpdf2
 folium
 streamlit-folium
+
+# Advanced RAG dependencies
+qdrant-client
+rank_bm25
+cohere
+sentence-transformers
+langchain-openai
+langchain-cohere

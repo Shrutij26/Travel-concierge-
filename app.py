@@ -14,6 +14,8 @@ from streamlit_folium import st_folium
 from fpdf import FPDF
 import re
 
+from advanced_rag import get_travel_knowledge
+
 # Load environment variables
 load_dotenv()
 
@@ -152,6 +154,7 @@ st.sidebar.markdown("### Active Tools:")
 st.sidebar.markdown("- 🌤️ **Weather**: OpenWeatherMap")
 st.sidebar.markdown("- 🏛️ **Places**: Geoapify")
 st.sidebar.markdown("- 🔍 **Web Search**: Tavily")
+st.sidebar.markdown("- 🧠 **RAG KB**: Advanced RAG")
 
 st.markdown("---")
 st.markdown("### 🎯 Customize Your Trip")
@@ -229,6 +232,11 @@ tools = [
         max_results=3, 
         include_images=True,
         description="Useful for searching the web for budget tips, best time to visit, local food recommendations, and finding beautiful images of places."
+    ),
+    Tool(
+        name="TravelKnowledgeTool",
+        func=get_travel_knowledge,
+        description="Useful to search curated travel knowledge base like PDF guides and blogs. Use this to find specialized travel tips, best time to visit, and budget options based on curated travel data."
     )
 ]
 
