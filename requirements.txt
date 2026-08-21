@@ -21,3 +21,6 @@ langchain-cohere
 # Auth and Persistence
 bcrypt
 langgraph-checkpoint-sqlite
+
+# Tracing and Evaluation
+langsmith

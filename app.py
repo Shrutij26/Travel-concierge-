@@ -3,7 +3,7 @@ import os
 import requests
 from dotenv import load_dotenv
 
-from langchain.agents import create_agent
+from multi_agent import build_multi_agent_graph
 from langgraph.checkpoint.sqlite import SqliteSaver
 import sqlite3
 from auth_db import init_db, create_user, authenticate_user, get_user_quota, increment_user_quota, get_user_preferences, update_user_preference
@@ -281,71 +281,84 @@ if "messages" not in st.session_state:
 if "memory" not in st.session_state:
     st.session_state.memory = get_checkpointer()
 
-# Define Tools
-tools = [
-    Tool(
-        name="WeatherTool",
-        func=get_weather,
-        description="Useful for getting the current weather and temperature for a specific city. Input should be the city name."
-    ),
+# Enable LangSmith Tracing if API key exists
+if os.environ.get("LANGCHAIN_API_KEY"):
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+    os.environ["LANGCHAIN_PROJECT"] = "Travel-Concierge-MultiAgent"
+
+# --- Tool Guardrails ---
+def safe_tool_wrapper(func):
+    """Wrapper to handle tool hallucinations or errors gracefully."""
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            return f"Tool execution failed: {str(e)}. Please correct your arguments and try again."
+    wrapper.__name__ = func.__name__
+    wrapper.__doc__ = func.__doc__
+    return wrapper
+
+# Define Specialized Tools for Sub-Agents
+local_guide_tools = [
     Tool(
         name="AttractionsTool",
-        func=get_top_attractions,
+        func=safe_tool_wrapper(get_top_attractions),
         description="Useful for finding the top tourist attractions and places to visit in a specific city. Input should be the city name."
     ),
     Tool(
-        name="LocationMapTool",
-        func=get_location_map,
-        description="Useful for finding the exact location of a hotel, restaurant, or place and displaying it on a map. Use this ONLY when the user asks to see the location or asks for hotel suggestions."
+        name="TravelKnowledgeTool",
+        func=safe_tool_wrapper(get_travel_knowledge),
+        description="Useful to search curated travel knowledge base like PDF guides and blogs. Use this to find specialized travel tips, best time to visit, and budget options based on curated travel data."
+    )
+]
+
+logistics_tools = [
+    Tool(
+        name="WeatherTool",
+        func=safe_tool_wrapper(get_weather),
+        description="Useful for getting the current weather and temperature for a specific city. Input should be the city name."
     ),
+    Tool(
+        name="LocationMapTool",
+        func=safe_tool_wrapper(get_location_map),
+        description="Useful for finding the exact location of a hotel, restaurant, or place and displaying it on a map. Use this ONLY when the user asks to see the location or asks for hotel suggestions."
+    )
+]
+
+budget_tools = [
     TavilySearchResults(
         max_results=3, 
         include_images=True,
         description="Useful for searching the web for budget tips, best time to visit, local food recommendations, and finding beautiful images of places."
-    ),
-    Tool(
-        name="TravelKnowledgeTool",
-        func=get_travel_knowledge,
-        description="Useful to search curated travel knowledge base like PDF guides and blogs. Use this to find specialized travel tips, best time to visit, and budget options based on curated travel data."
-    ),
+    )
+]
+
+planner_tools = [
     Tool(
         name="SavePreferenceTool",
-        func=save_user_preference,
+        func=safe_tool_wrapper(save_user_preference),
         description="Useful to save the user's long-term preferences to Semantic Memory, like their diet, budget style, or favorite places. Input format: 'key:value' (e.g. 'diet:vegan'). Use this whenever the user states a preference."
     )
 ]
 
-# Initialize Agent
+tools_dict = {
+    "local_guide_tools": local_guide_tools,
+    "logistics_tools": logistics_tools,
+    "budget_tools": budget_tools,
+    "planner_tools": planner_tools
+}
+
+# Initialize Agent Graph
 if not os.environ.get("GROQ_API_KEY"):
     st.warning("Please add your GROQ_API_KEY to the .env file to run the app.")
     st.stop()
 
 llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.7)
 
-system_message = (
-    "You are Maya, a premium, highly-detailed Indian travel concierge. "
-    "When a user asks about a destination, you MUST create a perfect, highly detailed day-by-day itinerary. "
-    "Your itinerary MUST include:\n"
-    "- Specific daily plans: where to start, what to do, and exactly how to do it.\n"
-    "- Budget-balancing guidelines: (e.g. balancing luxury meals with street food, or free sights with paid activities).\n"
-    "- Weather and top attractions context using your tools.\n"
-    "ALWAYS check the weather, find attractions, search the web, and respect the user's Semantic Memory (long-term preferences).\n"
-    "If the user states a new preference (like 'I am vegan'), use the SavePreferenceTool to remember it.\n\n"
-    "CRITICAL IMAGE INSTRUCTIONS:\n"
-    "You MUST display beautiful photos of the destination. "
-    "You MUST extract REAL image URLs from the Tavily Web Search results. NEVER use fake or placeholder URLs like 'IMAGE_URL_1'. "
-    "Display the real images side-by-side using EXACTLY this HTML:\n"
-    "<div style='display: flex; gap: 10px; margin-bottom: 15px; overflow-x: auto;'>\n"
-    "  <img src='REAL_URL_FROM_SEARCH_1' width='250' style='border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); object-fit: cover; height: 180px;'/>\n"
-    "  <img src='REAL_URL_FROM_SEARCH_2' width='250' style='border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); object-fit: cover; height: 180px;'/>\n"
-    "</div>\n"
-)
-
-agent = create_agent(
-    model=llm,
-    tools=tools,
-    system_prompt=system_message,
-    checkpointer=st.session_state.memory,
+agent = build_multi_agent_graph(
+    llm=llm,
+    tools_dict=tools_dict,
+    checkpointer=st.session_state.memory
 )
 
 st.markdown("### 💬 Chat with Maya")
@@ -417,18 +430,18 @@ if prompt:
                 # Use stream to show progress and reduce perceived latency
                 for event in agent.stream({"messages": [{"role": "user", "content": enhanced_prompt}]}, config=config, stream_mode="updates"):
                     for node, data in event.items():
-                        if node == "agent":
-                            status.update(label="Maya is analyzing...", state="running")
-                        elif node == "tools":
-                            status.update(label="Maya is fetching live data...", state="running")
-                            for msg in data.get("messages", []):
-                                if hasattr(msg, 'name') and msg.name:
-                                    st.write(f"🔍 Used tool: **{msg.name}**")
+                        if node == "Planner":
+                            status.update(label="Planner is analyzing and orchestrating...", state="running")
+                        elif node in ["LocalGuideAgent", "LogisticsAgent", "BudgetAgent"]:
+                            status.update(label=f"{node} is gathering specific data...", state="running")
+                            if "messages" in data and len(data["messages"]) > 0:
+                                st.write(f"⚙️ **{node}**: Completed task.")
                 
                 status.update(label="Response ready!", state="complete", expanded=False)
             
             # Fetch the final message from state
             state = agent.get_state(config)
+            # The final answer is the last message in the sequence
             raw_response = state.values["messages"][-1].content
             
             # Fix Gemini dict list format
