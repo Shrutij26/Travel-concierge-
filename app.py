@@ -425,35 +425,35 @@ if prompt:
             try:
                 increment_user_quota(st.session_state.user_id)
                 config = {"configurable": {"thread_id": f"maya_session_{st.session_state.user_id}"}}
-            
-            with st.status("Maya is thinking... ✈️", expanded=True) as status:
-                # Use stream to show progress and reduce perceived latency
-                for event in agent.stream({"messages": [{"role": "user", "content": enhanced_prompt}]}, config=config, stream_mode="updates"):
-                    for node, data in event.items():
-                        if node == "Planner":
-                            status.update(label="Planner is analyzing and orchestrating...", state="running")
-                        elif node in ["LocalGuideAgent", "LogisticsAgent", "BudgetAgent"]:
-                            status.update(label=f"{node} is gathering specific data...", state="running")
-                            if "messages" in data and len(data["messages"]) > 0:
-                                st.write(f"⚙️ **{node}**: Completed task.")
                 
-                status.update(label="Response ready!", state="complete", expanded=False)
-            
-            # Fetch the final message from state
-            state = agent.get_state(config)
-            # The final answer is the last message in the sequence
-            raw_response = state.values["messages"][-1].content
-            
-            # Fix Gemini dict list format
-            if isinstance(raw_response, list):
-                text_parts = [part["text"] for part in raw_response if isinstance(part, dict) and "text" in part]
-                response = "\n".join(text_parts)
-            else:
-                response = str(raw_response)
+                with st.status("Maya is thinking... ✈️", expanded=True) as status:
+                    # Use stream to show progress and reduce perceived latency
+                    for event in agent.stream({"messages": [{"role": "user", "content": enhanced_prompt}]}, config=config, stream_mode="updates"):
+                        for node, data in event.items():
+                            if node == "Planner":
+                                status.update(label="Planner is analyzing and orchestrating...", state="running")
+                            elif node in ["LocalGuideAgent", "LogisticsAgent", "BudgetAgent"]:
+                                status.update(label=f"{node} is gathering specific data...", state="running")
+                                if "messages" in data and len(data["messages"]) > 0:
+                                    st.write(f"⚙️ **{node}**: Completed task.")
+                    
+                    status.update(label="Response ready!", state="complete", expanded=False)
                 
-            st.session_state.messages.append({"role": "assistant", "content": response})
-        except Exception as e:
-            st.error(f"An error occurred: {str(e)}")
+                # Fetch the final message from state
+                state = agent.get_state(config)
+                # The final answer is the last message in the sequence
+                raw_response = state.values["messages"][-1].content
+                
+                # Fix Gemini dict list format
+                if isinstance(raw_response, list):
+                    text_parts = [part["text"] for part in raw_response if isinstance(part, dict) and "text" in part]
+                    response = "\n".join(text_parts)
+                else:
+                    response = str(raw_response)
+                    
+                st.session_state.messages.append({"role": "assistant", "content": response})
+            except Exception as e:
+                st.error(f"An error occurred: {str(e)}")
     
     # Rerun to cleanly render the messages above the suggestion chips
     st.rerun()
