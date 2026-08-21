@@ -4,7 +4,9 @@ import requests
 from dotenv import load_dotenv
 
 from langchain.agents import create_agent
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
+import sqlite3
+from auth_db import init_db, create_user, authenticate_user, get_user_quota, increment_user_quota, get_user_preferences, update_user_preference
 from langchain_core.tools import Tool
 from langchain_groq import ChatGroq
 from langchain_community.tools.tavily_search import TavilySearchResults
@@ -97,9 +99,69 @@ def get_location_map(query: str) -> str:
             return f"Successfully generated a map for {name}. The user can now see it."
     return f"Could not find coordinates for {query}."
 
+def save_user_preference(pref_string: str) -> str:
+    """Useful to save user preferences, facts, dietary restrictions, budget styles, and long-term memory for future sessions.
+    Input should be exactly in the format 'key:value' (e.g. 'diet:vegetarian', 'favorite_city:Paris')."""
+    if "user_id" not in st.session_state or not st.session_state.user_id:
+        return "Error: User not logged in."
+    
+    try:
+        key, value = pref_string.split(":", 1)
+        update_user_preference(st.session_state.user_id, key.strip(), value.strip())
+        return f"Successfully saved preference '{key.strip()}' as '{value.strip()}' into semantic memory."
+    except ValueError:
+        return "Error: Input must be exactly in 'key:value' format."
+
 # --- App Setup ---
 
 st.set_page_config(page_title="Maya — Your Travel Concierge", page_icon="✈️", layout="wide")
+
+init_db()
+MAX_API_CALLS = 10
+
+if "user_id" not in st.session_state:
+    st.session_state.user_id = None
+    st.session_state.username = None
+
+def login_signup_ui():
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>✈️ Welcome to Maya AI</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center;'>Your personal, intelligent travel planner.</p>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        tab1, tab2 = st.tabs(["Login", "Sign Up"])
+        
+        with tab1:
+            l_user = st.text_input("Username", key="l_user")
+            l_pass = st.text_input("Password", type="password", key="l_pass")
+            if st.button("Login", key="l_btn", use_container_width=True):
+                uid = authenticate_user(l_user, l_pass)
+                if uid:
+                    st.session_state.user_id = uid
+                    st.session_state.username = l_user
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password.")
+                    
+        with tab2:
+            s_user = st.text_input("New Username", key="s_user")
+            s_pass = st.text_input("New Password", type="password", key="s_pass")
+            if st.button("Sign Up", key="s_btn", use_container_width=True):
+                if create_user(s_user, s_pass):
+                    st.success("Account created! Please log in.")
+                else:
+                    st.error("Username already exists.")
+
+if not st.session_state.user_id:
+    login_signup_ui()
+    st.stop()
+
+@st.cache_resource
+def get_checkpointer():
+    conn = sqlite3.connect("travel_checkpoints.db", check_same_thread=False)
+    # create LangGraph checkpointer tables if they don't exist
+    return SqliteSaver(conn)
 
 # Custom CSS for a beautiful, premium aesthetic
 st.markdown("""
@@ -148,7 +210,14 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-st.sidebar.title("✈️ Settings")
+st.sidebar.title(f"✈️ Hello, {st.session_state.username}!")
+quota = get_user_quota(st.session_state.user_id)
+st.sidebar.markdown(f"**API Quota:** {quota}/{MAX_API_CALLS}")
+if st.sidebar.button("Logout"):
+    st.session_state.user_id = None
+    st.session_state.username = None
+    st.rerun()
+st.sidebar.markdown("---")
 st.sidebar.image("https://images.unsplash.com/photo-1436491865332-7a61a109cc05?q=80&w=800&auto=format&fit=crop", use_container_width=True)
 st.sidebar.markdown("### Active Tools:")
 st.sidebar.markdown("- 🌤️ **Weather**: OpenWeatherMap")
@@ -171,7 +240,8 @@ st.markdown("---")
 
 if st.sidebar.button("Clear Chat"):
     st.session_state.messages = []
-    st.session_state.memory = MemorySaver()
+    # Note: For SQLite checkpointer, true clearing would involve deleting the thread. 
+    # For now, we just clear the local UI.
     if "map_data" in st.session_state:
         del st.session_state["map_data"]
     st.rerun()
@@ -209,7 +279,7 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
     
 if "memory" not in st.session_state:
-    st.session_state.memory = MemorySaver()
+    st.session_state.memory = get_checkpointer()
 
 # Define Tools
 tools = [
@@ -237,6 +307,11 @@ tools = [
         name="TravelKnowledgeTool",
         func=get_travel_knowledge,
         description="Useful to search curated travel knowledge base like PDF guides and blogs. Use this to find specialized travel tips, best time to visit, and budget options based on curated travel data."
+    ),
+    Tool(
+        name="SavePreferenceTool",
+        func=save_user_preference,
+        description="Useful to save the user's long-term preferences to Semantic Memory, like their diet, budget style, or favorite places. Input format: 'key:value' (e.g. 'diet:vegan'). Use this whenever the user states a preference."
     )
 ]
 
@@ -254,7 +329,8 @@ system_message = (
     "- Specific daily plans: where to start, what to do, and exactly how to do it.\n"
     "- Budget-balancing guidelines: (e.g. balancing luxury meals with street food, or free sights with paid activities).\n"
     "- Weather and top attractions context using your tools.\n"
-    "ALWAYS check the weather, find attractions, and search the web for tips and REAL image URLs.\n\n"
+    "ALWAYS check the weather, find attractions, search the web, and respect the user's Semantic Memory (long-term preferences).\n"
+    "If the user states a new preference (like 'I am vegan'), use the SavePreferenceTool to remember it.\n\n"
     "CRITICAL IMAGE INSTRUCTIONS:\n"
     "You MUST display beautiful photos of the destination. "
     "You MUST extract REAL image URLs from the Tavily Web Search results. NEVER use fake or placeholder URLs like 'IMAGE_URL_1'. "
@@ -317,8 +393,10 @@ if prompt:
     if "map_data" in st.session_state:
         del st.session_state["map_data"]
 
-    # FEATURE 2: Budget-aware planning (Inject all filters into prompt)
-    enhanced_prompt = f"[System Note: My budget is ₹{budget}. Traveling as: {travel_style}. Duration: {duration}. Interests: {interests}.] {prompt}"
+    # FEATURE 2 & Semantic Memory: Budget-aware planning (Inject all filters and DB preferences into prompt)
+    prefs = get_user_preferences(st.session_state.user_id)
+    prefs_str = ", ".join([f"{k}: {v}" for k, v in prefs.items()]) if prefs else "None yet."
+    enhanced_prompt = f"[System Note: Budget: ₹{budget}. Traveling as: {travel_style}. Duration: {duration}. Interests: {interests}. Saved Long-term Preferences (Semantic Memory): {prefs_str}] {prompt}"
     
     # Add user message to UI
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -327,8 +405,13 @@ if prompt:
 
     # Generate response
     with st.chat_message("assistant"):
-        try:
-            config = {"configurable": {"thread_id": "maya_session"}}
+        quota = get_user_quota(st.session_state.user_id)
+        if quota >= MAX_API_CALLS:
+            st.error("⚠️ You have reached your API call limit. Please upgrade your plan.")
+        else:
+            try:
+                increment_user_quota(st.session_state.user_id)
+                config = {"configurable": {"thread_id": f"maya_session_{st.session_state.user_id}"}}
             
             with st.status("Maya is thinking... ✈️", expanded=True) as status:
                 # Use stream to show progress and reduce perceived latency

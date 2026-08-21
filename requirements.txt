@@ -17,3 +17,7 @@ cohere
 sentence-transformers
 langchain-openai
 langchain-cohere
+
+# Auth and Persistence
+bcrypt
+langgraph-checkpoint-sqlite
